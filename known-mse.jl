@@ -41,14 +41,12 @@ end
 user_optim = user_optim_A
 
 using DataFrames
+include("ADAM.jl")
 
 function syncTrace(users::Vector{WeinerProcess}, C::Float64;
     iterations :: Int     = 1_000,
        initial :: Float64 = 1e-3,
-        decay1 :: Float64 = 0.9,
-	    decay2 :: Float64 = 0.999,
-	   epsilon :: Float64 = 1e-8,
-        alpha  :: Float64 = 0.01,
+       lr      :: ADAM    = ADAM(alpha=1.0),
         )
 
     N = length(users)
@@ -59,35 +57,18 @@ function syncTrace(users::Vector{WeinerProcess}, C::Float64;
 
     Λ[1] = initial
 
-    moment1 = 0.0
-    moment2 = 0.0
-
-    weight1 = decay1
-    weight2 = decay2
-
-    @inbounds for t in 1:iterations
-        #r[t,:] = pmap(i -> user_optim(users[i], Λ[t]), 1:N)
+    @inbounds for k in 1:iterations
+        #r[k,:] = pmap(i -> user_optim(users[i], Λ[k]), 1:N)
         @inbounds for i in 1:N
-            r[t,i] = user_optim(users[i], Λ[t])
+            r[k,i] = user_optim(users[i], Λ[k])
         end
-        err[t] = total_error(users, r[t,:])
+        err[k] = total_error(users, r[k,:])
 
-        if t < iterations
-            gradient = C - sum(r[t,:])
+        if k < iterations
+            gradient = C - sum(r[k,:])
 
-            moment1 = decay1 * moment1 + (1 - decay1) * gradient
-            moment2 = decay2 * moment2 + (1 - decay2) * gradient^2
-
-            corrected1 = moment1/(1 - weight1)
-            corrected2 = moment2/(1 - weight2)
-
-            weight1 *= decay1
-            weight2 *= decay2
-
-            delta  = corrected1 / ( sqrt(corrected2) + epsilon)
-
-            Λ[t+1] = Λ[t] - alpha * delta
-            Λ[t+1] = max(Λ[t+1], 1e-8)
+            Λ[k+1] = Λ[k] - gradient_step!(lr,gradient)
+            Λ[k+1] = max(Λ[k+1], 1e-8)
         end
     end
 
@@ -106,10 +87,7 @@ end
 function asyncTrace(users::Vector{WeinerProcess}, C::Float64;
     iterations :: Int     = 1_000,
        initial :: Float64 = 1e-3,
-        decay1 :: Float64 = 0.9,
-	    decay2 :: Float64 = 0.999,
-	   epsilon :: Float64 = 1e-8,
-        alpha  :: Float64 = 0.01,
+       lr      :: ADAM    = ADAM(alpha=1.0),
         )
 
     N = length(users)
@@ -124,12 +102,6 @@ function asyncTrace(users::Vector{WeinerProcess}, C::Float64;
     next_sampling_times = zeros(Float64, N)
 
     Λ[1] = initial
-
-    moment1 = 0.0
-    moment2 = 0.0
-
-    weight1 = decay1
-    weight2 = decay2
 
     current_time[1] = 0.0
     @inbounds for i in 1:N
@@ -148,18 +120,7 @@ function asyncTrace(users::Vector{WeinerProcess}, C::Float64;
         if k < iterations
             gradient = C - sum(r[k,:])
 
-            moment1 = decay1 * moment1 + (1 - decay1) * gradient
-            moment2 = decay2 * moment2 + (1 - decay2) * gradient^2
-
-            corrected1 = moment1/(1 - weight1)
-            corrected2 = moment2/(1 - weight2)
-
-            weight1 *= decay1
-            weight2 *= decay2
-
-            delta  = corrected1 / ( sqrt(corrected2) + epsilon)
-
-            Λ[k+1] = Λ[k] - alpha * delta
+            Λ[k+1] = Λ[k] - gradient_step!(lr,gradient)
             Λ[k+1] = max(Λ[k+1], 1e-8)
 
             r[k+1,:]     = r[k,:]
