@@ -182,6 +182,25 @@ function asyncTrace(users::Vector{WeinerProcess}, C::Float64;
     return df
 end
 
+using NLopt
+
+function optimal_rates(users :: Vector{WeinerProcess}, C :: Float64)
+    N = length(users)
+
+    objective(rates, gradient)  = total_error(users, rates)
+    constraint(rates, gradient) = C - sum(rates) 
+
+    opt = Opt(:LN_COBYLA, N)
+
+    lower_bounds!(opt, zeros(N))
+    upper_bounds!(opt, C*ones(N))
+    min_objective!(opt, objective)
+    equality_constraint!(opt, constraint)
+
+    guess = ones(N)./N
+
+    (err, rates, ret) = NLopt.optimize(opt, guess)
+end
 
 users = [ WeinerProcess(1,1), WeinerProcess(1,1), WeinerProcess(1,1), 
           WeinerProcess(1,1), WeinerProcess(1,2)]
