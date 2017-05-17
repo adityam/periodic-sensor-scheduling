@@ -8,17 +8,39 @@ function MSE(p :: WeinerProcess, T)
     p.σ^2/(2*p.a) * ( ( exp(x) - 1 ) / x - 1)
 end
 
-using Roots
-using DataFrames
+function total_error(users::Vector{WeinerProcess}, rates)
+    N = length(users)
+    T = 1.0 ./rates
+    sum([MSE(users[i], T[i]) for i in 1:N])
+end
 
-function user_optim(p::WeinerProcess, λ)
+
+# We implement two functions to find the best response at the user. The first
+# directly optimizes the user's objective, the sencond finds a root of the
+# derivative being equal to zero. 
+
+using Optim
+
+user_objective(p :: WeinerProcess, T, λ) = MSE(p, T) + λ/T
+
+function user_optim_A(p :: WeinerProcess, λ :: Float64)
+   # I did not find an implementation of gradient search in Julia
+   # The code below uses Brent's method (whatever that is)
+   result = Optim.optimize(r -> user_objective(p, 1/r, λ), 0, 1e6)
+   return Optim.minimizer(result)
+end
+
+using Roots
+function user_optim_B(p::WeinerProcess, λ)
     f(T) = exp(2*p.a*T) * (2*p.a*T - 1) + 1 - 4*p.a^2*λ/p.σ^2
     root = fzero(r -> f(1/r), 0, 1e6) 
 end
 
-function total_error(users,rates)
-    sum([MSE(users[i], rates[i]) for i in 1:length(users)])
-end
+# There were some experiments where option `B` gave incorrect results. Option
+# `A` is faster, which is an added benefit!
+user_optim = user_optim_A
+
+using DataFrames
 
 function syncTrace(users::Vector{WeinerProcess}, C::Float64;
     iterations :: Int     = 1_000,
@@ -65,7 +87,7 @@ function syncTrace(users::Vector{WeinerProcess}, C::Float64;
             delta  = corrected1 / ( sqrt(corrected2) + epsilon)
 
             Λ[t+1] = Λ[t] - alpha * delta
-            Λ[t+1] = max(Λ[t+1], 1e-3)
+            Λ[t+1] = max(Λ[t+1], 1e-8)
         end
     end
 
@@ -138,10 +160,10 @@ function asyncTrace(users::Vector{WeinerProcess}, C::Float64;
             delta  = corrected1 / ( sqrt(corrected2) + epsilon)
 
             Λ[k+1] = Λ[k] - alpha * delta
-            Λ[k+1] = max(Λ[k+1], 1e-3)
+            Λ[k+1] = max(Λ[k+1], 1e-8)
 
             r[k+1,:]     = r[k,:]
-            r[k+1,tx[k]]  = user_optim(users[tx[k]], Λ[k+1])
+            r[k+1,tx[k]] = user_optim(users[tx[k]], Λ[k+1])
             next_sampling_times[tx[k]] += 1.0/r[k+1, tx[k]]
         end
     end
